@@ -1,0 +1,200 @@
+name: Build APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: 8.9 }
+      - name: Generate project files
+        run: |
+          cat > settings.gradle <<'EOF_FILE_0'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = 'Minesweeper'
+          include ':app'
+          EOF_FILE_0
+          cat > build.gradle <<'EOF_FILE_1'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF_FILE_1
+          cat > gradle.properties <<'EOF_FILE_2'
+          org.gradle.jvmargs=-Xmx2g
+          android.nonTransitiveRClass=true
+          EOF_FILE_2
+          mkdir -p app
+          cat > app/build.gradle <<'EOF_FILE_3'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.example.minesweeper'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.example.minesweeper'
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF_FILE_3
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'EOF_FILE_4'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application android:label="Minesweeper" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF_FILE_4
+          mkdir -p app/src/main/java/com/example/minesweeper
+          cat > app/src/main/java/com/example/minesweeper/MainActivity.java <<'EOF_FILE_5'
+          package com.example.minesweeper;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebView;
+
+          public class MainActivity extends Activity {
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  WebView w = new WebView(this);
+                  w.getSettings().setJavaScriptEnabled(true);
+                  w.setBackgroundColor(0xFFC0C0C0);
+                  w.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
+                  w.loadUrl("file:///android_asset/index.html");
+                  setContentView(w);
+              }
+          }
+          EOF_FILE_5
+          mkdir -p app/src/main/assets
+          cat > app/src/main/assets/index.html <<'EOF_FILE_6'
+          <!DOCTYPE html><html><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+          <title>Minesweeper</title>
+          <style>
+          body{margin:0;background:#c0c0c0;font-family:monospace;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+          #bar{display:flex;justify-content:space-between;align-items:center;padding:8px}
+          .lcd{background:#000;color:#f00;font-size:22px;padding:2px 8px;min-width:48px;text-align:center}
+          button,select{font:16px monospace;padding:6px 10px;background:#c0c0c0;border:2px outset #fff;border-radius:0;color:#000}
+          button.on{border-style:inset;background:#a8a8a8}
+          #top{display:flex;justify-content:space-between;padding:0 8px 4px}
+          #board{display:grid;margin:8px auto;border:3px inset #888;width:max-content;touch-action:none}
+          .c{display:flex;align-items:center;justify-content:center;font-weight:bold;box-sizing:border-box;background:#c0c0c0;border:3px outset #fff}
+          .c.o{border:1px solid #888;background:#d8d8d8}
+          .c.x{background:#f44}
+          #msg{text-align:center;font-size:18px;height:24px}
+          </style></head><body>
+          <div id="top"><select id="lvl" onchange="init()">
+          <option value="9,9,10">9x9 / 10</option><option value="12,12,25">12x12 / 25</option><option value="16,16,40">16x16 / 40</option></select>
+          <button id="fm" onclick="flagMode=!flagMode;this.className=flagMode?'on':''">Flag mode</button></div>
+          <div id="bar"><div class="lcd" id="mc">0</div><button id="face" onclick="init()">:)</button><div class="lcd" id="tc">0</div></div>
+          <div id="msg"></div>
+          <div id="board"></div>
+          <script>
+          let R,C,M,g,over,started,flags,t,tm,flagMode=false,timer,fired;
+          const $=id=>document.getElementById(id);
+          const col=['','#00f','#080','#f00','#008','#800','#088','#000','#888'];
+          function init(){
+           [R,C,M]=$('lvl').value.split(',').map(Number);
+           g=[];for(let i=0;i<R*C;i++)g.push({m:0,o:0,f:0,n:0});
+           over=0;started=0;flags=0;t=0;clearInterval(tm);
+           $('face').textContent=':)';$('msg').textContent='';draw();
+          }
+          function nb(i){
+           const r=(i/C)|0,c=i%C,a=[];
+           for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+            if(!dr&&!dc)continue;const y=r+dr,x=c+dc;
+            if(y>=0&&y<R&&x>=0&&x<C)a.push(y*C+x);
+           }return a;
+          }
+          function place(first){
+           const ban=new Set([first,...nb(first)]);let n=0;
+           while(n<M){const i=(Math.random()*R*C)|0;if(g[i].m||ban.has(i))continue;g[i].m=1;n++;}
+           for(let i=0;i<R*C;i++)g[i].n=nb(i).filter(j=>g[j].m).length;
+          }
+          function reveal(i){
+           const st=[i];
+           while(st.length){
+            const k=st.pop(),c=g[k];
+            if(c.o||c.f)continue;c.o=1;
+            if(c.m){return lose(k);}
+            if(c.n==0)nb(k).forEach(j=>{if(!g[j].o)st.push(j)});
+           }
+           if(g.filter(c=>c.o).length==R*C-M)win();
+          }
+          function lose(k){
+           over=1;clearInterval(tm);
+           g.forEach(c=>{if(c.m)c.o=1});g[k].hit=1;
+           $('face').textContent='X(';$('msg').textContent='You lost';
+          }
+          function win(){
+           over=1;clearInterval(tm);
+           g.forEach(c=>{if(c.m){c.f=1}});flags=M;
+           $('face').textContent='B)';$('msg').textContent='You won in '+t+'s';
+          }
+          function flag(i){
+           const c=g[i];if(over||c.o)return;
+           c.f=!c.f;flags+=c.f?1:-1;draw();
+          }
+          function tap(i){
+           if(over)return;const c=g[i];
+           if(flagMode){flag(i);return;}
+           if(c.f)return;
+           if(!started){started=1;place(i);tm=setInterval(()=>{t++;$('tc').textContent=t},1000);}
+           if(c.o){
+            if(c.n>0){
+             const ns=nb(i);
+             if(ns.filter(j=>g[j].f).length==c.n){for(const j of ns){if(over)break;if(!g[j].f&&!g[j].o)reveal(j);}}
+            }
+           }else reveal(i);
+           draw();
+          }
+          function draw(){
+           const s=Math.min(40,Math.floor((innerWidth-24)/C));
+           const b=$('board');b.style.gridTemplateColumns='repeat('+C+','+s+'px)';
+           b.style.fontSize=(s*0.6)+'px';
+           let h='';
+           g.forEach((c,i)=>{
+            let cls='c',x='',st='';
+            if(c.o){cls+=' o';if(c.m){x='💣';if(c.hit)cls+=' x';}else if(c.n){x=c.n;st='color:'+col[c.n];}}
+            else if(c.f){x='🚩';if(over&&!c.m)x='❌';}
+            h+='<div class="'+cls+'" data-i="'+i+'" style="width:'+s+'px;height:'+s+'px;'+st+'">'+x+'</div>';
+           });
+           b.innerHTML=h;
+           $('mc').textContent=M-flags;$('tc').textContent=t;
+          }
+          const bd=$('board');
+          bd.addEventListener('pointerdown',e=>{
+           const el=e.target.closest('.c');if(!el)return;
+           const i=+el.dataset.i;fired=0;
+           timer=setTimeout(()=>{fired=1;if(navigator.vibrate)navigator.vibrate(30);flag(i);},400);
+           bd._i=i;
+          });
+          bd.addEventListener('pointerup',e=>{
+           clearTimeout(timer);
+           if(!fired&&bd._i!=null)tap(bd._i);
+           bd._i=null;
+          });
+          ['pointercancel','pointerleave'].forEach(n=>bd.addEventListener(n,()=>{clearTimeout(timer);bd._i=null;}));
+          bd.addEventListener('contextmenu',e=>e.preventDefault());
+          init();
+          </script></body></html>
+          EOF_FILE_6
+      - name: Build
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minesweeper-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
